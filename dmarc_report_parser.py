@@ -1,17 +1,16 @@
-import sys
-import os
-import zipfile
 import gzip
+import os
+import sys
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timezone
-import subprocess
 
 
 def extract_xml_from_zip(zip_path):
-    with zipfile.ZipFile(zip_path, 'r') as z:
-        xml_files = [f for f in z.namelist() if f.lower().endswith('.xml')]
+    with zipfile.ZipFile(zip_path, "r") as z:
+        xml_files = [f for f in z.namelist() if f.lower().endswith(".xml")]
         if not xml_files:
-            print('No XML files found in the zip archive.')
+            print("No XML files found in the zip archive.")
             return []
         xml_contents = []
         for xml_file in xml_files:
@@ -19,135 +18,234 @@ def extract_xml_from_zip(zip_path):
                 xml_contents.append(f.read())
         return xml_contents
 
+
 def extract_xml_from_gz(gz_path):
-    with gzip.open(gz_path, 'rb') as f:
+    with gzip.open(gz_path, "rb") as f:
         return [f.read()]
+
 
 def parse_unix_timestamp(ts):
     try:
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     except Exception:
         return str(ts)
 
-def format_record(rec, org_name):
-    count = rec['count']
-    ip = rec['source_ip']
-    dkim = rec['dkim']
-    spf = rec['spf']
-    disposition = rec['disposition']
-    count_str = f"One (1) email" if count == '1' else f"{count} emails"
-    base = f"{count_str} was sent from IP {ip}\n"
-    # Status logic
-    passed_spf = spf == 'pass'
-    passed_dkim = dkim == 'pass'
-    # Determine status and message
-    if passed_spf and passed_dkim and disposition in ('none', 'pass'):
-        # Success
-        status = "✅ Successful Delivery"
-        details = (
-            f"✅ Passed SPF\n"
-            f"✅ Passed DKIM checks\n"
-            f"✅ No delivery issues\n"
-            f"{org_name} fully accepted and processed the message in line with your DMARC policy."
-        )
-    elif (passed_spf or passed_dkim) and disposition in ('none', 'pass', 'quarantine'):
-        # Partial pass
-        status = "⚠️ Warning (Partial Pass)"
-        details = (
-            f"{'✅' if passed_spf else '❌'} Passed SPF\n"
-            f"{'✅' if passed_dkim else '❌'} Passed DKIM checks\n"
-            f"⚠️ Delivered, but not fully authenticated\n"
-            f"{org_name} delivered the message, but {'DKIM' if not passed_dkim else 'SPF'} failed. You may want to verify your {'DKIM' if not passed_dkim else 'SPF'} setup."
-        )
-    else:
-        # Failure
-        status = "❌ Failure"
-        details = (
-            f"{'✅' if passed_spf else '❌'} Passed SPF\n"
-            f"{'✅' if passed_dkim else '❌'} Passed DKIM checks\n"
-            f"🚫 Blocked or sent to spam\n"
-            f"{org_name} rejected or quarantined the message based on your DMARC policy."
-        )
-    return f"{status}\n\n{base}{details}"
 
 def parse_dmarc_xml(xml_content):
-    try:
-        tree = ET.ElementTree(ET.fromstring(xml_content))
-        root = tree.getroot()
-        if root is None:
-            return 'Error: XML root is None.'
-        ns = ''
-        if root.tag.startswith('{'):
-            ns = root.tag.split('}')[0] + '}'
-        # Report metadata
-        org_name = root.findtext(f'.//{ns}org_name', default='')
-        report_id = root.findtext(f'.//{ns}report_id', default='')
-        begin = root.findtext(f'.//{ns}date_range/{ns}begin', default='')
-        end = root.findtext(f'.//{ns}date_range/{ns}end', default='')
-        # Policy
-        domain = root.findtext(f'.//{ns}policy_published/{ns}domain', default='')
-        p = root.findtext(f'.//{ns}policy_published/{ns}p', default='')
-        sp = root.findtext(f'.//{ns}policy_published/{ns}sp', default='')
-        pct = root.findtext(f'.//{ns}policy_published/{ns}pct', default='')
-        # Records
-        records = []
-        for record in root.findall(f'.//{ns}record'):
-            source_ip = record.findtext(f'.//{ns}row/{ns}source_ip', default='')
-            count = record.findtext(f'.//{ns}row/{ns}count', default='')
-            disposition = record.findtext(f'.//{ns}row/{ns}policy_evaluated/{ns}disposition', default='')
-            dkim = record.findtext(f'.//{ns}row/{ns}policy_evaluated/{ns}dkim', default='')
-            spf = record.findtext(f'.//{ns}row/{ns}policy_evaluated/{ns}spf', default='')
-            records.append({
-                'source_ip': source_ip,
-                'count': count,
-                'disposition': disposition,
-                'dkim': dkim,
-                'spf': spf
-            })
-        # Build summary
-        summary_lines = []
-        summary_lines.append(f"Report for: {domain}\nFrom: {org_name}\nPolicy: p={p}, sp={sp}, pct={pct}\nReport Period: {parse_unix_timestamp(begin)} to {parse_unix_timestamp(end)}\n\n")
-        for i, rec in enumerate(records):
-            summary_lines.append(format_record(rec, org_name))
-            if i < len(records) - 1:
-                summary_lines.append('\n\u23bb\n')  # Unicode for ⸻
-        return '\n'.join(summary_lines)
-    except Exception as e:
-        return f'Error parsing XML: {e}'
+    tree = ET.ElementTree(ET.fromstring(xml_content))
+    root = tree.getroot()
+    if root is None:
+        return "Error: XML root is None."
+    ns = ""
+    if root.tag.startswith("{"):
+        ns = root.tag.split("}")[0] + "}"
+    # Report metadata
+    org_name = root.findtext(f".//{ns}org_name", default="")
+    begin = root.findtext(f".//{ns}date_range/{ns}begin", default="")
+    end = root.findtext(f".//{ns}date_range/{ns}end", default="")
+    # Policy
+    domain = root.findtext(f".//{ns}policy_published/{ns}domain", default="")
+    p = root.findtext(f".//{ns}policy_published/{ns}p", default="")
+    sp = root.findtext(f".//{ns}policy_published/{ns}sp", default="")
+    pct = root.findtext(f".//{ns}policy_published/{ns}pct", default="")
 
-def show_dialog(summary):
-    # Escape double quotes and backslashes for AppleScript
-    safe_summary = summary.replace('"', '\"').replace('\\', '\\\\')
-    # AppleScript command
-    script = f'display dialog "{safe_summary}" with title "DMARC Report Summary" buttons ["OK"] default button "OK"'
-    try:
-        subprocess.run(['osascript', '-e', script])
-    except Exception as e:
-        print(f'Error showing dialog: {e}')
+    # Extract detailed records with all available authentication data
+    records = []
+    for record in root.findall(f".//{ns}record"):
+        # Basic row data
+        source_ip = record.findtext(f".//{ns}row/{ns}source_ip", default="")
+        count = record.findtext(f".//{ns}row/{ns}count", default="")
+        disposition = record.findtext(
+            f".//{ns}row/{ns}policy_evaluated/{ns}disposition", default=""
+        )
+        dkim_result = record.findtext(
+            f".//{ns}row/{ns}policy_evaluated/{ns}dkim", default=""
+        )
+        spf_result = record.findtext(
+            f".//{ns}row/{ns}policy_evaluated/{ns}spf", default=""
+        )
+
+        # Detailed authentication results
+        auth_results = record.find(f".//{ns}auth_results")
+        spf_details = {}
+        dkim_details = []
+
+        if auth_results is not None:
+            # SPF details
+            spf_auth = auth_results.find(f".//{ns}spf")
+            if spf_auth is not None:
+                spf_details = {
+                    "domain": spf_auth.findtext(f".//{ns}domain", default=""),
+                    "result": spf_auth.findtext(f".//{ns}result", default=""),
+                }
+
+            # DKIM details (can have multiple)
+            for dkim_auth in auth_results.findall(f".//{ns}dkim"):
+                dkim_details.append(
+                    {
+                        "domain": dkim_auth.findtext(f".//{ns}domain", default=""),
+                        "result": dkim_auth.findtext(f".//{ns}result", default=""),
+                        "selector": dkim_auth.findtext(f".//{ns}selector", default=""),
+                    }
+                )
+
+        records.append(
+            {
+                "source_ip": source_ip,
+                "count": count,
+                "disposition": disposition,
+                "dkim": dkim_result,
+                "spf": spf_result,
+                "spf_details": spf_details,
+                "dkim_details": dkim_details,
+            }
+        )
+
+    # Calculate summary stats
+    total_messages = sum(int(rec["count"]) for rec in records)
+    failed_records = []
+    warning_records = []
+    success_count = 0
+
+    for rec in records:
+        passed_spf = rec["spf"] == "pass"
+        passed_dkim = rec["dkim"] == "pass"
+
+        if passed_spf and passed_dkim and rec["disposition"] in ("none", "pass"):
+            success_count += int(rec["count"])
+        elif (passed_spf or passed_dkim) and rec["disposition"] in (
+            "none",
+            "pass",
+            "quarantine",
+        ):
+            warning_records.append(rec)
+        else:
+            failed_records.append(rec)
+
+    # Build output - only show failures and warnings with summary
+    output_lines = []
+
+    # Report header
+    output_lines.append(
+        f"Report: {domain} | From: {org_name} | Period: {parse_unix_timestamp(begin)} to {parse_unix_timestamp(end)}"
+    )
+    output_lines.append(f"Policy: p={p}, sp={sp}, pct={pct}")
+    output_lines.append("")
+
+    # Show failures with detailed information
+    if failed_records:
+        output_lines.append("🚨 FAILURES - INVESTIGATE IMMEDIATELY 🚨")
+        output_lines.append("=" * 60)
+
+        for i, rec in enumerate(failed_records):
+            count_str = "1 email" if rec["count"] == "1" else f"{rec['count']} emails"
+            output_lines.append(
+                f"\n❌ FAILURE #{i + 1}: {count_str} from IP {rec['source_ip']}"
+            )
+            output_lines.append(f"   Disposition: {rec['disposition'].upper()}")
+            output_lines.append(
+                f"   Policy Results: SPF={rec['spf'].upper()}, DKIM={rec['dkim'].upper()}"
+            )
+
+            # SPF details
+            if rec["spf_details"]:
+                output_lines.append(
+                    f"   SPF Check: domain={rec['spf_details']['domain']}, result={rec['spf_details']['result']}"
+                )
+
+            # DKIM details
+            if rec["dkim_details"]:
+                for j, dkim in enumerate(rec["dkim_details"]):
+                    selector_info = (
+                        f", selector={dkim['selector']}" if dkim["selector"] else ""
+                    )
+                    output_lines.append(
+                        f"   DKIM Check #{j + 1}: domain={dkim['domain']}, result={dkim['result']}{selector_info}"
+                    )
+
+            output_lines.append(
+                "   → ACTION: Verify email authentication for this IP address"
+            )
+
+        output_lines.append("")
+
+    # Show warnings with details
+    if warning_records:
+        output_lines.append("⚠️ WARNINGS - PARTIAL AUTHENTICATION")
+        output_lines.append("-" * 40)
+
+        for i, rec in enumerate(warning_records):
+            count_str = "1 email" if rec["count"] == "1" else f"{rec['count']} emails"
+            output_lines.append(
+                f"\n⚠️ WARNING #{i + 1}: {count_str} from IP {rec['source_ip']}"
+            )
+            output_lines.append(
+                f"   Policy Results: SPF={rec['spf'].upper()}, DKIM={rec['dkim'].upper()}"
+            )
+
+            if rec["spf_details"]:
+                output_lines.append(
+                    f"   SPF: domain={rec['spf_details']['domain']}, result={rec['spf_details']['result']}"
+                )
+            if rec["dkim_details"]:
+                for dkim in rec["dkim_details"]:
+                    output_lines.append(
+                        f"   DKIM: domain={dkim['domain']}, result={dkim['result']}"
+                    )
+
+        output_lines.append("")
+
+    # Summary line
+    failed_count = sum(int(rec["count"]) for rec in failed_records)
+    warning_count = sum(int(rec["count"]) for rec in warning_records)
+
+    summary_parts = []
+    if failed_count > 0:
+        summary_parts.append(f"🚨 {failed_count} FAILED")
+    if warning_count > 0:
+        summary_parts.append(f"⚠️ {warning_count} WARNINGS")
+    if success_count > 0:
+        summary_parts.append(f"✅ {success_count} SUCCESS")
+
+    output_lines.append(
+        f"SUMMARY: {' | '.join(summary_parts)} | Total: {total_messages} messages"
+    )
+
+    # Only return output if there are failures or warnings
+    if failed_records or warning_records:
+        return "\n".join(output_lines)
+    else:
+        return f"\u2705 {domain} ({org_name}): All {total_messages} messages passed authentication"
+
 
 def main():
-    if len(sys.argv) != 2:
-        print('Usage: python dmarc_report_parser.py <report.zip|report.gz|report.xml>')
-        sys.exit(1)
-    path = sys.argv[1]
-    if not os.path.isfile(path):
-        print(f'File not found: {path}')
-        sys.exit(1)
-    ext = os.path.splitext(path)[1].lower()
-    if ext == '.zip':
-        xmls = extract_xml_from_zip(path)
-    elif ext == '.gz':
-        xmls = extract_xml_from_gz(path)
-    elif ext == '.xml':
-        with open(path, 'rb') as f:
-            xmls = [f.read()]
-    else:
-        print('Unsupported file type. Please provide a .zip, .gz, or .xml file.')
-        sys.exit(1)
-    for xml_content in xmls:
-        summary = parse_dmarc_xml(xml_content)
-        print(summary)
-        show_dialog(summary)
+    # Set UTF-8 encoding for Windows console output
+    if sys.platform.startswith("win"):
+        import codecs
 
-if __name__ == '__main__':
-    main() 
+        sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
+
+    reports = os.listdir("reports")
+    for report in reports:
+        path = os.path.join("reports", report)
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".zip":
+            xmls = extract_xml_from_zip(path)
+        elif ext == ".gz":
+            xmls = extract_xml_from_gz(path)
+        elif ext == ".xml":
+            with open(path, "rb") as f:
+                xmls = [f.read()]
+        else:
+            raise Exception(
+                "Unsupported file type. Please provide a .zip, .gz, or .xml file."
+            )
+        for xml_content in xmls:
+            summary = parse_dmarc_xml(xml_content)
+            print(summary)
+
+
+if __name__ == "__main__":
+    main()
